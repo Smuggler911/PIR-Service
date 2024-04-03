@@ -349,20 +349,6 @@ func DeleteProfile(c *gin.Context) {
 	c.Status(200)
 }
 
-func CancelApplication(c *gin.Context) {
-	exists, _ := c.Get("user")
-	if exists == nil {
-		return
-	}
-	usr, _ := c.MustGet("user").(models.User)
-	userId := usr.Id
-	applicationId := c.Param("application_id")
-	var application models.Application
-	config.DB.Where("user_id = ? AND id = ? AND is_in_progress = ?", userId, applicationId, false).Delete(&application)
-	c.Status(200)
-
-}
-
 func checkingEmailReg(email string) bool {
 
 	matched, _ := regexp.MatchString(`([A-Za-z0-9_\-.])+@([A-Za-z0-9_\-.])+\.([A-Za-z]{2,4})`, email)
