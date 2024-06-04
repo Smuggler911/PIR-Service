@@ -1,4 +1,4 @@
-module MakeWish-serverSide
+module pir-serverSide
 
 go 1.21
 

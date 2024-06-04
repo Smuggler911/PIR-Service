@@ -1,10 +1,10 @@
 package main
 
 import (
-	"MakeWish-serverSide/config"
-	"MakeWish-serverSide/internal/api"
-	"MakeWish-serverSide/internal/server"
 	"log"
+	"pir-serverSide/config"
+	"pir-serverSide/internal/api"
+	"pir-serverSide/internal/server"
 )
 
 func init() {

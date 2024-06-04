@@ -1,13 +1,13 @@
 package middleware
 
 import (
-	"MakeWish-serverSide/config"
-	"MakeWish-serverSide/internal/repository/models"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"log"
 	"net/http"
+	"pir-serverSide/config"
+	"pir-serverSide/internal/repository/models"
 	"time"
 )
 
