@@ -1,10 +1,11 @@
 package repository
 
 import (
-	"MakeWish-serverSide/config"
-	"MakeWish-serverSide/internal/repository/models"
 	"github.com/gin-gonic/gin"
+	"pir-serverSide/config"
+	"pir-serverSide/internal/repository/models"
 	"strconv"
+	"time"
 )
 
 func CreateCommentary(c *gin.Context) {
@@ -30,6 +31,7 @@ func CreateCommentary(c *gin.Context) {
 		Content:   comment.Content,
 		UserID:    userId,
 		ArticleID: uint(convertStringUint(articleId)),
+		CreatedAt: time.Now().UTC(),
 	}
 	comments = append(comments, commentBody)
 	config.DB.Create(&commentBody)
@@ -62,11 +64,11 @@ func GetCommentsByArticle(c *gin.Context) {
 	var users []models.User
 	config.DB.Where("is_banned", false).Find(&users)
 	for _, user := range users {
-		if !user.IsBanned {
+		if !user.IsBlocked {
 			config.DB.Where("article_id = ?", articleId).Preload("User").Preload("Likes").Preload("Dislikes").Limit(limit).Offset(offset).Find(&comments)
 			for i := 0; i < len(comments); i++ {
 				comments[i].LikeCount = int64(likeCount(comments[i].Likes))
-				comments[i].DislikeCount = int64(dislikeCount(comments[i].Dislikes))
+
 			}
 			c.JSON(200, gin.H{
 				"comments": comments,
@@ -125,27 +127,6 @@ func LikeCommentary(c *gin.Context) {
 				"message": "вы  лайкали этот пост",
 			})
 			return
-
-		}
-	}
-	if commnetary.Dislikes == nil {
-		c.JSON(500, gin.H{
-			"message": "что то не так",
-		})
-		return
-	}
-	if commnetary.Dislikes != nil && len(commnetary.Dislikes) != 0 {
-		for _, dislike := range commnetary.Dislikes {
-			if dislike.UserID == userId {
-				err := config.DB.Model(&commnetary).Association("Dislikes").Delete(&dislike)
-				if err != nil {
-					c.JSON(500, gin.H{
-						"message": err,
-					})
-					return
-				}
-				break
-			}
 		}
 	}
 	liked := 1
@@ -165,66 +146,101 @@ func LikeCommentary(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"message": "liked",
 	})
-
 }
-func DislikeCommentary(c *gin.Context) {
+
+func BanCommentary(c *gin.Context) {
 	exists, _ := c.Get("user")
 	if exists == nil {
 		return
 	}
-	if exists == nil {
-		return
-	}
-	user, _ := c.MustGet("user").(models.User)
-	userId := user.Id
-	commentaryId := c.Param("commentary_id")
-	var commentary models.ArticleCommentary
-	var dislikes []models.Dislike
+	id := c.Param("id")
 
-	config.DB.Preload("Likes").Preload("Dislikes").First(&commentary, commentaryId)
-
-	for _, dislike := range commentary.Dislikes {
-
-		if userId == dislike.UserID {
-
-			c.JSON(400, gin.H{
-				"message": "настолько не понравился отзыв что вы решили влепить кучу дизлайков?",
-			})
-			return
-		}
-	}
-	if commentary.Likes == nil {
-		c.JSON(500, gin.H{
-			"message": "что-то не так",
+	usr, _ := c.MustGet("user").(models.User)
+	IsAdmin := usr.IsAdmin
+	if !IsAdmin {
+		c.JSON(400, gin.H{
+			"message": "вы не являетесь админом",
 		})
 		return
 	}
-	for _, like := range commentary.Likes {
-		if like.UserID == userId && len(commentary.Likes) != 0 && commentary.Likes != nil {
-			err := config.DB.Model(&commentary).Association("Likes").Delete(&like)
-			if err != nil {
-				c.JSON(500, gin.H{
-					"message": err,
-				})
-				return
-			}
-		}
-	}
-	disliked := 1
-
-	dislikes = append(
-		dislikes, models.Dislike{
-			Disliked: int64(disliked),
-			UserID:   userId,
-		},
-	)
-
-	commentary.Dislikes = dislikes
-
+	var commentary models.ArticleCommentary
+	config.DB.Where("blocked = ?", false).First(&commentary, id)
 	config.DB.Model(&commentary).Updates(models.ArticleCommentary{
-		Dislikes: commentary.Dislikes,
+		Blocked: true,
 	})
 	c.JSON(200, gin.H{
-		"message": "disliked",
+		"result": "banned",
 	})
+}
+
+func PublishCommentary(c *gin.Context) {
+	exists, _ := c.Get("user")
+	if exists == nil {
+		return
+	}
+	id := c.Param("id")
+
+	usr, _ := c.MustGet("user").(models.User)
+	IsAdmin := usr.IsAdmin
+	if !IsAdmin {
+		c.JSON(400, gin.H{
+			"message": "вы не являетесь админом",
+		})
+		return
+	}
+	var commentary models.ArticleCommentary
+	config.DB.Where("published= ?", false).First(&commentary, id)
+	config.DB.Model(&commentary).Updates(models.ArticleCommentary{
+		Published: true,
+	})
+	c.JSON(200, gin.H{
+		"result": "published",
+	})
+}
+
+func GetBanned(c *gin.Context) {
+
+	exists, _ := c.Get("user")
+	if exists == nil {
+		return
+	}
+
+	usr, _ := c.MustGet("user").(models.User)
+	IsAdmin := usr.IsAdmin
+	if !IsAdmin {
+		c.JSON(400, gin.H{
+			"message": "вы не являетесь админом",
+		})
+		return
+	}
+	var coms []models.ArticleCommentary
+	config.DB.Where("blocked = ?", true).Find(&coms)
+
+	c.JSON(200, gin.H{
+		"comments": coms,
+	})
+
+}
+func GetPublished(c *gin.Context) {
+
+	exists, _ := c.Get("user")
+	if exists == nil {
+		return
+	}
+
+	usr, _ := c.MustGet("user").(models.User)
+	IsAdmin := usr.IsAdmin
+	if !IsAdmin {
+		c.JSON(400, gin.H{
+			"message": "вы не являетесь админом",
+		})
+		return
+	}
+	var coms []models.ArticleCommentary
+	config.DB.Where("published = ?", true).Find(&coms)
+
+	c.JSON(200, gin.H{
+		"comments": coms,
+	})
+
 }

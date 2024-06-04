@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"MakeWish-serverSide/config"
-	"MakeWish-serverSide/internal/repository/models"
 	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
@@ -10,27 +8,16 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
-	"log"
 	"net/http"
 	"path/filepath"
+	"pir-serverSide/config"
+	"pir-serverSide/internal/repository/models"
 	"regexp"
 	"time"
 )
 
 func RegisterNewUser(c *gin.Context) {
-
-	var registerBody *models.User
-
-	err := c.BindJSON(&registerBody)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"error":  true,
-			"result": "не введены данные",
-		})
-		return
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(registerBody.Password), 10)
+	hash, err := bcrypt.GenerateFromPassword([]byte(c.PostForm("password")), 10)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  true,
@@ -38,9 +25,8 @@ func RegisterNewUser(c *gin.Context) {
 		})
 		return
 	}
-
 	var user models.User
-	checkMail := config.DB.First(&user, "email = ?", registerBody.Email).Error
+	checkMail := config.DB.First(&user, "email = ?", c.PostForm("email")).Error
 	if !errors.Is(checkMail, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  true,
@@ -49,7 +35,7 @@ func RegisterNewUser(c *gin.Context) {
 		return
 	}
 
-	matchedEmail := checkingEmailReg(registerBody.Email)
+	matchedEmail := checkingEmailReg(c.PostForm("email"))
 
 	if !matchedEmail {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -58,37 +44,48 @@ func RegisterNewUser(c *gin.Context) {
 		})
 		return
 	}
-
-	if registerBody.Name == "admin" && registerBody.Password == "admin" {
-		registerBody.IsAdmin = true
+	admin := false
+	if c.PostForm("name") == "admin" && c.PostForm("password") == "admin" {
+		admin = true
 	}
 
-	if len(registerBody.Phone) < 12 || len(registerBody.Phone) > 13 {
-		log.Println("телефон  содержит меньше 12 или большк 13 cимволов:", registerBody.Phone)
-		c.JSON(http.StatusBadRequest, &gin.H{
-			"Message": "телефон  содержит меньше 12 или большк 13 cимволов",
-			"Status":  false,
+	file, err := c.FormFile("picture")
+	fmt.Println(err)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"message": "нет картинки",
 		})
 		return
 	}
 
-	re := regexp.MustCompile(`^(?:(?:\(?(?:00|\+)([1-4]\d\d|[1-9]\d?)\)?)?[\-\.\ \\\/]?)?((?:\(?\d{1,}\)?[\-\.\ \\\/]?){0,})(?:[\-\.\ \\\/]?(?:#|ext\.?|extension|x)[\-\.\ \\\/]?(\d+))?$`)
-	if !re.MatchString(registerBody.Phone) {
-		log.Println("Номер телефона введен не правильно:", registerBody.Phone)
-		c.JSON(http.StatusBadRequest, &gin.H{
-			"Message": "Номер телефона введен не правильно",
-			"Status":  false,
+	extension := filepath.Ext(file.Filename)
+	newFileName := uuid.New().String() + extension
+
+	env, _ := config.LoadConfig()
+	imgPath := env.ImgPath
+
+	destinationPath := imgPath + newFileName
+
+	fmt.Println("Destination Path:", destinationPath)
+
+	if err := c.SaveUploadedFile(file, destinationPath); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"message": "Невозможно сохранить картинку",
+			"error":   err.Error(),
 		})
 		return
 	}
 	newUser := models.User{
-		Name:        registerBody.Name,
-		Surname:     registerBody.Name,
-		Email:       registerBody.Email,
-		Phone:       registerBody.Phone,
+		Name:        c.PostForm("name"),
+		Surname:     c.PostForm("surname"),
+		Picture:     newFileName,
+		Email:       c.PostForm("email"),
 		Password:    string(hash),
-		DateOfBirth: registerBody.DateOfBirth,
-		IsAdmin:     registerBody.IsAdmin,
+		DateOfBirth: c.PostForm("date_of_birth"),
+		IsAdmin:     admin,
+		Description: c.PostForm("description"),
+		Role:        c.PostForm("role"),
+		City:        c.PostForm("city"),
 	}
 	result := config.DB.Create(&newUser)
 	if result.Error != nil {
@@ -143,7 +140,7 @@ func Login(c *gin.Context) {
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": user.Id,
-		"exp": time.Now().Add(time.Hour * 2 * 3).Unix(),
+		"exp": time.Now().Add(time.Hour * 20 * 30).Unix(),
 	})
 
 	env, _ := config.LoadConfig()
@@ -157,7 +154,7 @@ func Login(c *gin.Context) {
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
 
-	c.SetCookie("Authorization", tokenString, 3600*2*3, "", "", false, true)
+	c.SetCookie("Authorization", tokenString, 3600*2*3, "", "", true, true)
 	c.JSON(http.StatusOK, gin.H{
 		"token": tokenString,
 	})
@@ -175,16 +172,7 @@ func Validate(c *gin.Context) {
 	}
 }
 
-func Logout(c *gin.Context) {
-	exists, _ := c.Get("user")
-	if exists == nil {
-		return
-	}
-	c.SetCookie("Authorization", "", -1, "/", "", false, true)
-	c.String(http.StatusOK, "Вы вышли из аккаунта")
-}
-
-func EditProfilePic(c *gin.Context) {
+func EditProfileBanner(c *gin.Context) {
 	exists, _ := c.Get("user")
 	if exists == nil {
 		return
@@ -192,7 +180,7 @@ func EditProfilePic(c *gin.Context) {
 	usr, _ := c.MustGet("user").(models.User)
 	userId := usr.Id
 
-	file, err := c.FormFile("picture")
+	file, err := c.FormFile("banner")
 	fmt.Println(err)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
@@ -221,12 +209,22 @@ func EditProfilePic(c *gin.Context) {
 	var user models.User
 	config.DB.First(&user, userId)
 	config.DB.Model(&user).Updates(models.User{
-		Picture: newFileName,
+		Banner: newFileName,
 	})
 
 	c.JSON(200, gin.H{
 		"status": "updated",
 	})
+}
+
+func Logout(c *gin.Context) {
+	exists, _ := c.Get("user")
+	if exists == nil {
+		return
+	}
+
+	c.SetCookie("Authorization", "", -1, "/", "", false, true)
+	c.String(http.StatusOK, "Вы вышли из аккаунта")
 }
 
 func EditProfileContent(c *gin.Context) {
@@ -237,22 +235,54 @@ func EditProfileContent(c *gin.Context) {
 	usr, _ := c.MustGet("user").(models.User)
 	userId := usr.Id
 
-	var pContnet *models.User
+	var user models.User
 
-	err := c.BindJSON(&pContnet)
+	hash, err := bcrypt.GenerateFromPassword([]byte(c.PostForm("password")), 10)
 	if err != nil {
-		c.JSON(400, gin.H{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  true,
-			"result": "пустое поле",
+			"result": "Ошибка хеширования",
+		})
+		return
+
+	}
+	file, err := c.FormFile("picture")
+	fmt.Println(err)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"message": "нет картинки",
 		})
 		return
 	}
 
-	var user models.User
+	extension := filepath.Ext(file.Filename)
+	newFileName := uuid.New().String() + extension
 
+	env, _ := config.LoadConfig()
+	imgPath := env.ImgPath
+
+	destinationPath := imgPath + newFileName
+
+	fmt.Println("Destination Path:", destinationPath)
+
+	if err := c.SaveUploadedFile(file, destinationPath); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"message": "Невозможно сохранить картинку",
+			"error":   err.Error(),
+		})
+		return
+	}
 	config.DB.First(&user, userId)
 	config.DB.Model(&user).Updates(models.User{
-		Description: pContnet.Description,
+		Name:        c.PostForm("name"),
+		Surname:     c.PostForm("surname"),
+		Picture:     newFileName,
+		Email:       c.PostForm("email"),
+		Password:    string(hash),
+		DateOfBirth: c.PostForm("date_of_birth"),
+		Description: c.PostForm("description"),
+		Role:        c.PostForm("role"),
+		City:        c.PostForm("city"),
 	})
 
 	c.JSON(200, gin.H{
@@ -266,6 +296,7 @@ func BanUser(c *gin.Context) {
 		return
 	}
 	id := c.Param("id")
+
 	usr, _ := c.MustGet("user").(models.User)
 	IsAdmin := usr.IsAdmin
 	if !IsAdmin {
@@ -274,22 +305,14 @@ func BanUser(c *gin.Context) {
 		})
 		return
 	}
+
 	var user models.User
-	var body models.User
-	err := c.ShouldBindJSON(&body)
-	if err != nil {
-		c.JSON(400, gin.H{
-			"message": "напишите причину",
-		})
-		return
-	}
-	config.DB.First(&user, id)
+	config.DB.Where("is_banned = ?", false).First(&user, id)
 	config.DB.Model(&user).Updates(models.User{
-		IsBanned:     true,
-		WhyIsBlocked: body.WhyIsBlocked,
+		IsBlocked: true,
 	})
 	c.JSON(200, gin.H{
-		"message": "пользователь забанен",
+		"result": "banned",
 	})
 
 }
@@ -298,7 +321,6 @@ func UnbanUser(c *gin.Context) {
 	if exists == nil {
 		return
 	}
-	id := c.Param("id")
 	usr, _ := c.MustGet("user").(models.User)
 	IsAdmin := usr.IsAdmin
 	if !IsAdmin {
@@ -307,14 +329,25 @@ func UnbanUser(c *gin.Context) {
 		})
 		return
 	}
+	var userbody models.User
+
+	err := c.ShouldBindJSON(&userbody)
+	if err != nil {
+		return
+	}
+
+	userId := c.Param("id")
 	var user models.User
-	config.DB.First(&user, id)
-	config.DB.Model(&user).Updates(models.User{
-		IsBanned:     false,
-		WhyIsBlocked: "",
-	})
+	config.DB.First(&user, userId)
+
+	if user.IsBlocked {
+		userbody.IsBlocked = false
+	}
+
+	config.DB.Model(&user).Update("is_blocked", userbody.IsBlocked)
+
 	c.JSON(200, gin.H{
-		"message": "пользователь разабанен",
+		"result": "unbanned",
 	})
 }
 
@@ -332,7 +365,8 @@ func GetBannedUsers(c *gin.Context) {
 		return
 	}
 	var users []models.User
-	config.DB.Where("is_banned = ?", true).Find(&users)
+	config.DB.Where("is_blocked = ?", true).Find(&users)
+
 	c.JSON(200, gin.H{
 		"users": users,
 	})
@@ -347,6 +381,70 @@ func DeleteProfile(c *gin.Context) {
 	userId := user.Id
 	config.DB.Delete(&models.User{}, userId)
 	c.Status(200)
+}
+
+func Subscribe(c *gin.Context) {
+	exists, _ := c.Get("user")
+	if exists == nil {
+		return
+	}
+	usr, _ := c.MustGet("user").(models.User)
+	userId := usr.Id
+	creatorId := c.Param("creator_id")
+	sub := models.Subscriber{
+		Subscribed: true,
+		UserId:     int(userId),
+		CreatorId:  int(convertStringInt(creatorId)),
+	}
+	result := config.DB.Create(&sub)
+	if result.Error != nil {
+		c.JSON(400, gin.H{
+			"error":   result.Error,
+			"message": "не удалось подписаться на пользователя",
+		})
+	}
+	c.JSON(200, gin.H{
+		"result": "подписаны",
+	})
+}
+
+func GetSubscribers(c *gin.Context) {
+	exists, _ := c.Get("user")
+	if exists == nil {
+		return
+	}
+	usr, _ := c.MustGet("user").(models.User)
+	userId := usr.Id
+	var users []models.User
+	var subscriptions []models.Subscriber
+	config.DB.Where("creatorId = ?", userId).Preload("Creator").Find(&subscriptions)
+	for i := 0; i < len(subscriptions); i++ {
+		sub := subscriptions[i].CreatorId
+		config.DB.Where("id = ?", sub).Find(&users)
+	}
+	c.JSON(200, gin.H{
+		"subscribers": users,
+	})
+}
+func GetNotifications(c *gin.Context) {
+	exists, _ := c.Get("user")
+	if exists == nil {
+		return
+	}
+	usr, _ := c.MustGet("user").(models.User)
+	userId := usr.Id
+	var users []models.User
+	var subscriptions []models.Subscriber
+	var notifications []models.Notification
+	config.DB.Where("creatorId = ?", userId).Preload("Creator").Find(&subscriptions)
+	for i := 0; i < len(subscriptions); i++ {
+		sub := subscriptions[i].CreatorId
+		config.DB.Where("id = ?", sub).Find(&users)
+		config.DB.Where("userId = ?", sub).Preload("User").Find(&notifications)
+	}
+	c.JSON(200, gin.H{
+		"notifications": notifications,
+	})
 }
 
 func checkingEmailReg(email string) bool {

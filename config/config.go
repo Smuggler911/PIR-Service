@@ -8,7 +8,7 @@ import (
 type Config struct {
 	Port    string `mapstructure:"PORT"`
 	DbUrl   string `mapstructure:"DB_URL"`
-	ImgPath string `mapstructure:"IMG_PATH"`
+	ImgPath string `mapstructure:"IMG_PATH_PROD"`
 	Secret  string `mapstructure:"SECRET"`
 }
 
